@@ -718,6 +718,11 @@ impl Update {
                         {
                             return Some(Self::Paste);
                         }
+                        keyboard::Key::Character("a")
+                            if modifiers.command() =>
+                        {
+                            return Some(Self::Action(Action::SelectAll));
+                        }
                         _ => {}
                     }
 
