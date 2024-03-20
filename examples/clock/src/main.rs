@@ -8,10 +8,10 @@ use iced::{
 };
 
 pub fn main() -> iced::Result {
-    iced::application("Clock - Iced", Clock::update, Clock::view)
+    iced::program("Clock - Iced", Clock::update, Clock::view)
         .subscription(Clock::subscription)
         .theme(Clock::theme)
-        .antialiased()
+        .antialiasing(true)
         .run()
 }
 

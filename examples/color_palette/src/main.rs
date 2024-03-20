@@ -6,21 +6,19 @@ use iced::{
     Color, Element, Font, Length, Pixels, Point, Rectangle, Renderer, Size,
     Vector,
 };
-use palette::{
-    self, convert::FromColor, rgb::Rgb, Darken, Hsl, Lighten, ShiftHue,
-};
+use palette::{convert::FromColor, rgb::Rgb, Darken, Hsl, Lighten, ShiftHue};
 use std::marker::PhantomData;
 use std::ops::RangeInclusive;
 
 pub fn main() -> iced::Result {
-    iced::application(
+    iced::program(
         "Color Palette - Iced",
         ColorPalette::update,
         ColorPalette::view,
     )
     .theme(ColorPalette::theme)
     .default_font(Font::MONOSPACE)
-    .antialiased()
+    .antialiasing(true)
     .run()
 }
 

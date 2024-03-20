@@ -13,8 +13,8 @@ use std::collections::HashMap;
 pub fn main() -> iced::Result {
     tracing_subscriber::fmt::init();
 
-    iced::application("Multitouch - Iced", Multitouch::update, Multitouch::view)
-        .antialiased()
+    iced::program("Multitouch - Iced", Multitouch::update, Multitouch::view)
+        .antialiasing(true)
         .centered()
         .run()
 }

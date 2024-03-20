@@ -6,13 +6,13 @@ use iced::widget::{
 use iced::{Element, Length, Point, Rectangle, Renderer, Theme, Vector};
 
 pub fn main() -> iced::Result {
-    iced::application(
+    iced::program(
         "Vectorial Text - Iced",
         VectorialText::update,
         VectorialText::view,
     )
     .theme(|_| Theme::Dark)
-    .antialiased()
+    .antialiasing(true)
     .run()
 }
 

@@ -8,12 +8,12 @@ use rand::Rng;
 use std::fmt::Debug;
 
 fn main() -> iced::Result {
-    iced::application(
+    iced::program(
         "Sierpinski Triangle - Iced",
         SierpinskiEmulator::update,
         SierpinskiEmulator::view,
     )
-    .antialiased()
+    .antialiasing(true)
     .run()
 }
 

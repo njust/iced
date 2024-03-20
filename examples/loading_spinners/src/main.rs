@@ -11,12 +11,12 @@ use circular::Circular;
 use linear::Linear;
 
 pub fn main() -> iced::Result {
-    iced::application(
+    iced::program(
         "Loading Spinners - Iced",
         LoadingSpinners::update,
         LoadingSpinners::view,
     )
-    .antialiased()
+    .antialiasing(true)
     .run()
 }
 

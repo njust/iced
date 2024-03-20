@@ -1,13 +1,4 @@
-//! Create iced applications out of simple functions.
-//!
-//! You can use this API to create and run iced applications
-//! step by step—without coupling your logic to a trait
-//! or a specific type.
-//!
-//! This API is meant to be a more convenient—although less
-//! powerful—alternative to the [`Sandbox`] and [`Application`] traits.
-//!
-//! [`Sandbox`]: crate::Sandbox
+//! Create and run iced applications step by step.
 //!
 //! # Example
 //! ```no_run
@@ -15,7 +6,7 @@
 //! use iced::Theme;
 //!
 //! pub fn main() -> iced::Result {
-//!     iced::application("A counter", update, view)
+//!     iced::program("A counter", update, view)
 //!         .theme(|_| Theme::Dark)
 //!         .centered()
 //!         .run()
@@ -39,10 +30,12 @@
 //!     ]
 //! }
 //! ```
-use crate::application::{self, Application};
+use crate::application::Application;
 use crate::executor::{self, Executor};
 use crate::window;
-use crate::{Command, Element, Font, Result, Settings, Subscription};
+use crate::{Command, Element, Font, Result, Settings, Size, Subscription};
+
+pub use crate::application::{Appearance, DefaultStyle};
 
 use std::borrow::Cow;
 
@@ -53,7 +46,7 @@ use std::borrow::Cow;
 /// use iced::widget::{button, column, text, Column};
 ///
 /// pub fn main() -> iced::Result {
-///     iced::application("A counter", update, view).run()
+///     iced::program("A counter", update, view).run()
 /// }
 ///
 /// #[derive(Debug, Clone)]
@@ -74,41 +67,41 @@ use std::borrow::Cow;
 ///     ]
 /// }
 /// ```
-pub fn application<State, Message>(
+pub fn program<State, Message, Theme>(
     title: impl Title<State>,
     update: impl Update<State, Message>,
-    view: impl for<'a> self::View<'a, State, Message>,
-) -> Program<
-    impl Definition<State = State, Message = Message, Theme = crate::Theme>,
->
+    view: impl for<'a> self::View<'a, State, Message, Theme>,
+) -> Program<impl Definition<State = State, Message = Message, Theme = Theme>>
 where
-    State: Default + 'static,
+    State: 'static,
     Message: Send + std::fmt::Debug,
+    Theme: Default + DefaultStyle,
 {
     use std::marker::PhantomData;
 
-    struct Application<State, Message, Update, View> {
+    struct Application<State, Message, Theme, Update, View> {
         update: Update,
         view: View,
         _state: PhantomData<State>,
         _message: PhantomData<Message>,
+        _theme: PhantomData<Theme>,
     }
 
-    impl<State, Message, Update, View> Definition
-        for Application<State, Message, Update, View>
+    impl<State, Message, Theme, Update, View> Definition
+        for Application<State, Message, Theme, Update, View>
     where
-        State: Default,
         Message: Send + std::fmt::Debug,
+        Theme: Default + DefaultStyle,
         Update: self::Update<State, Message>,
-        View: for<'a> self::View<'a, State, Message>,
+        View: for<'a> self::View<'a, State, Message, Theme>,
     {
         type State = State;
         type Message = Message;
-        type Theme = crate::Theme;
+        type Theme = Theme;
         type Executor = executor::Default;
 
-        fn build(&self) -> (Self::State, Command<Self::Message>) {
-            (Self::State::default(), Command::none())
+        fn load(&self) -> Command<Self::Message> {
+            Command::none()
         }
 
         fn update(
@@ -133,20 +126,22 @@ where
             view,
             _state: PhantomData,
             _message: PhantomData,
+            _theme: PhantomData,
         },
         settings: Settings::default(),
     }
     .title(title)
 }
 
-/// A fully functioning and configured iced application.
+/// The underlying definition and configuration of an iced application.
 ///
-/// It can be [`run`]!
+/// You can use this API to create and run iced applications
+/// step by step—without coupling your logic to a trait
+/// or a specific type.
 ///
-/// Create one with the [`application`] helper.
+/// You can create a [`Program`] with the [`program`] helper.
 ///
 /// [`run`]: Program::run
-/// [`application`]: self::application()
 #[derive(Debug)]
 pub struct Program<P: Definition> {
     raw: P,
@@ -154,26 +149,58 @@ pub struct Program<P: Definition> {
 }
 
 impl<P: Definition> Program<P> {
-    /// Runs the [`Program`].
+    /// Runs the underlying [`Application`] of the [`Program`].
+    ///
+    /// The state of the [`Program`] must implement [`Default`].
+    /// If your state does not implement [`Default`], use [`run_with`]
+    /// instead.
+    ///
+    /// [`run_with`]: Self::run_with
     pub fn run(self) -> Result
     where
         Self: 'static,
+        P::State: Default,
     {
-        struct Instance<P: Definition> {
+        self.run_with(P::State::default)
+    }
+
+    /// Runs the underlying [`Application`] of the [`Program`] with a
+    /// closure that creates the initial state.
+    pub fn run_with(
+        self,
+        initialize: impl Fn() -> P::State + Clone + 'static,
+    ) -> Result
+    where
+        Self: 'static,
+    {
+        use std::marker::PhantomData;
+
+        struct Instance<P: Definition, I> {
             program: P,
             state: P::State,
+            _initialize: PhantomData<I>,
         }
 
-        impl<P: Definition> Application for Instance<P> {
+        impl<P: Definition, I: Fn() -> P::State> Application for Instance<P, I> {
             type Message = P::Message;
             type Theme = P::Theme;
-            type Flags = P;
+            type Flags = (P, I);
             type Executor = P::Executor;
 
-            fn new(program: Self::Flags) -> (Self, Command<Self::Message>) {
-                let (state, command) = P::build(&program);
+            fn new(
+                (program, initialize): Self::Flags,
+            ) -> (Self, Command<Self::Message>) {
+                let state = initialize();
+                let command = program.load();
 
-                (Self { program, state }, command)
+                (
+                    Self {
+                        program,
+                        state,
+                        _initialize: PhantomData,
+                    },
+                    command,
+                )
             }
 
             fn title(&self) -> String {
@@ -194,19 +221,23 @@ impl<P: Definition> Program<P> {
                 self.program.view(&self.state)
             }
 
+            fn subscription(&self) -> Subscription<Self::Message> {
+                self.program.subscription(&self.state)
+            }
+
             fn theme(&self) -> Self::Theme {
                 self.program.theme(&self.state)
             }
 
-            fn subscription(&self) -> Subscription<Self::Message> {
-                self.program.subscription(&self.state)
+            fn style(&self, theme: &Self::Theme) -> Appearance {
+                self.program.style(&self.state, theme)
             }
         }
 
         let Self { raw, settings } = self;
 
         Instance::run(Settings {
-            flags: raw,
+            flags: (raw, initialize),
             id: settings.id,
             window: settings.window,
             fonts: settings.fonts,
@@ -221,11 +252,11 @@ impl<P: Definition> Program<P> {
         Self { settings, ..self }
     }
 
-    /// Toggles the [`Settings::antialiasing`] to `true` for the [`Program`].
-    pub fn antialiased(self) -> Self {
+    /// Sets the [`Settings::antialiasing`] of the [`Program`].
+    pub fn antialiasing(self, antialiasing: bool) -> Self {
         Self {
             settings: Settings {
-                antialiasing: true,
+                antialiasing,
                 ..self.settings
             },
             ..self
@@ -263,12 +294,40 @@ impl<P: Definition> Program<P> {
         }
     }
 
-    /// Sets the [`window::Settings::exit_on_close_request`] to `false` in the [`Program`].
-    pub fn ignore_close_request(self) -> Self {
+    /// Sets the [`window::Settings::exit_on_close_request`] of the [`Program`].
+    pub fn exit_on_close_request(self, exit_on_close_request: bool) -> Self {
         Self {
             settings: Settings {
                 window: window::Settings {
-                    exit_on_close_request: false,
+                    exit_on_close_request,
+                    ..self.settings.window
+                },
+                ..self.settings
+            },
+            ..self
+        }
+    }
+
+    /// Sets the [`window::Settings::size`] of the [`Program`].
+    pub fn window_size(self, size: impl Into<Size>) -> Self {
+        Self {
+            settings: Settings {
+                window: window::Settings {
+                    size: size.into(),
+                    ..self.settings.window
+                },
+                ..self.settings
+            },
+            ..self
+        }
+    }
+
+    /// Sets the [`window::Settings::transparent`] of the [`Program`].
+    pub fn transparent(self, transparent: bool) -> Self {
+        Self {
+            settings: Settings {
+                window: window::Settings {
+                    transparent,
                     ..self.settings.window
                 },
                 ..self.settings
@@ -328,14 +387,25 @@ impl<P: Definition> Program<P> {
             settings: self.settings,
         }
     }
+
+    /// Sets the style logic of the [`Program`].
+    pub fn style(
+        self,
+        f: impl Fn(&P::State, &P::Theme) -> Appearance,
+    ) -> Program<
+        impl Definition<State = P::State, Message = P::Message, Theme = P::Theme>,
+    > {
+        Program {
+            raw: with_style(self.raw, f),
+            settings: self.settings,
+        }
+    }
 }
 
 /// The internal definition of a [`Program`].
 ///
 /// You should not need to implement this trait directly. Instead, use the
-/// helper functions available in the [`program`] module and the [`Program`] struct.
-///
-/// [`program`]: crate::program
+/// methods available in the [`Program`] struct.
 #[allow(missing_docs)]
 pub trait Definition: Sized {
     /// The state of the program.
@@ -345,12 +415,12 @@ pub trait Definition: Sized {
     type Message: Send + std::fmt::Debug;
 
     /// The theme of the program.
-    type Theme: Default + application::DefaultStyle;
+    type Theme: Default + DefaultStyle;
 
     /// The executor of the program.
     type Executor: Executor;
 
-    fn build(&self) -> (Self::State, Command<Self::Message>);
+    fn load(&self) -> Command<Self::Message>;
 
     fn update(
         &self,
@@ -377,6 +447,10 @@ pub trait Definition: Sized {
     fn theme(&self, _state: &Self::State) -> Self::Theme {
         Self::Theme::default()
     }
+
+    fn style(&self, _state: &Self::State, theme: &Self::Theme) -> Appearance {
+        DefaultStyle::default_style(theme)
+    }
 }
 
 fn with_title<P: Definition>(
@@ -398,8 +472,8 @@ fn with_title<P: Definition>(
         type Theme = P::Theme;
         type Executor = P::Executor;
 
-        fn build(&self) -> (Self::State, Command<Self::Message>) {
-            self.program.build()
+        fn load(&self) -> Command<Self::Message> {
+            self.program.load()
         }
 
         fn title(&self, state: &Self::State) -> String {
@@ -431,6 +505,14 @@ fn with_title<P: Definition>(
         ) -> Subscription<Self::Message> {
             self.program.subscription(state)
         }
+
+        fn style(
+            &self,
+            state: &Self::State,
+            theme: &Self::Theme,
+        ) -> Appearance {
+            self.program.style(state, theme)
+        }
     }
 
     WithTitle { program, title }
@@ -454,10 +536,8 @@ fn with_load<P: Definition>(
         type Theme = P::Theme;
         type Executor = executor::Default;
 
-        fn build(&self) -> (Self::State, Command<Self::Message>) {
-            let (state, command) = self.program.build();
-
-            (state, Command::batch([command, (self.load)()]))
+        fn load(&self) -> Command<Self::Message> {
+            Command::batch([self.program.load(), (self.load)()])
         }
 
         fn update(
@@ -479,15 +559,23 @@ fn with_load<P: Definition>(
             self.program.title(state)
         }
 
-        fn theme(&self, state: &Self::State) -> Self::Theme {
-            self.program.theme(state)
-        }
-
         fn subscription(
             &self,
             state: &Self::State,
         ) -> Subscription<Self::Message> {
             self.program.subscription(state)
+        }
+
+        fn theme(&self, state: &Self::State) -> Self::Theme {
+            self.program.theme(state)
+        }
+
+        fn style(
+            &self,
+            state: &Self::State,
+            theme: &Self::Theme,
+        ) -> Appearance {
+            self.program.style(state, theme)
         }
     }
 
@@ -519,8 +607,8 @@ fn with_subscription<P: Definition>(
             (self.subscription)(state)
         }
 
-        fn build(&self) -> (Self::State, Command<Self::Message>) {
-            self.program.build()
+        fn load(&self) -> Command<Self::Message> {
+            self.program.load()
         }
 
         fn update(
@@ -544,6 +632,14 @@ fn with_subscription<P: Definition>(
 
         fn theme(&self, state: &Self::State) -> Self::Theme {
             self.program.theme(state)
+        }
+
+        fn style(
+            &self,
+            state: &Self::State,
+            theme: &Self::Theme,
+        ) -> Appearance {
+            self.program.style(state, theme)
         }
     }
 
@@ -575,8 +671,8 @@ fn with_theme<P: Definition>(
             (self.theme)(state)
         }
 
-        fn build(&self) -> (Self::State, Command<Self::Message>) {
-            self.program.build()
+        fn load(&self) -> Command<Self::Message> {
+            self.program.load()
         }
 
         fn title(&self, state: &Self::State) -> String {
@@ -604,9 +700,81 @@ fn with_theme<P: Definition>(
         ) -> Subscription<Self::Message> {
             self.program.subscription(state)
         }
+
+        fn style(
+            &self,
+            state: &Self::State,
+            theme: &Self::Theme,
+        ) -> Appearance {
+            self.program.style(state, theme)
+        }
     }
 
     WithTheme { program, theme: f }
+}
+
+fn with_style<P: Definition>(
+    program: P,
+    f: impl Fn(&P::State, &P::Theme) -> Appearance,
+) -> impl Definition<State = P::State, Message = P::Message, Theme = P::Theme> {
+    struct WithStyle<P, F> {
+        program: P,
+        style: F,
+    }
+
+    impl<P: Definition, F> Definition for WithStyle<P, F>
+    where
+        F: Fn(&P::State, &P::Theme) -> Appearance,
+    {
+        type State = P::State;
+        type Message = P::Message;
+        type Theme = P::Theme;
+        type Executor = P::Executor;
+
+        fn style(
+            &self,
+            state: &Self::State,
+            theme: &Self::Theme,
+        ) -> Appearance {
+            (self.style)(state, theme)
+        }
+
+        fn load(&self) -> Command<Self::Message> {
+            self.program.load()
+        }
+
+        fn title(&self, state: &Self::State) -> String {
+            self.program.title(state)
+        }
+
+        fn update(
+            &self,
+            state: &mut Self::State,
+            message: Self::Message,
+        ) -> Command<Self::Message> {
+            self.program.update(state, message)
+        }
+
+        fn view<'a>(
+            &self,
+            state: &'a Self::State,
+        ) -> Element<'a, Self::Message, Self::Theme> {
+            self.program.view(state)
+        }
+
+        fn subscription(
+            &self,
+            state: &Self::State,
+        ) -> Subscription<Self::Message> {
+            self.program.subscription(state)
+        }
+
+        fn theme(&self, state: &Self::State) -> Self::Theme {
+            self.program.theme(state)
+        }
+    }
+
+    WithStyle { program, style: f }
 }
 
 /// The title logic of some [`Program`].
@@ -614,7 +782,7 @@ fn with_theme<P: Definition>(
 /// This trait is implemented both for `&static str` and
 /// any closure `Fn(&State) -> String`.
 ///
-/// You can use any of these in [`Program::title`].
+/// This trait allows the [`program`] builder to take any of them.
 pub trait Title<State> {
     /// Produces the title of the [`Program`].
     fn title(&self, state: &State) -> String;
@@ -637,10 +805,8 @@ where
 
 /// The update logic of some [`Program`].
 ///
-/// This trait allows [`application`] to take any closure that
+/// This trait allows the [`program`] builder to take any closure that
 /// returns any `Into<Command<Message>>`.
-///
-/// [`application`]: self::application()
 pub trait Update<State, Message> {
     /// Processes the message and updates the state of the [`Program`].
     fn update(
@@ -666,22 +832,20 @@ where
 
 /// The view logic of some [`Program`].
 ///
-/// This trait allows [`application`] to take any closure that
+/// This trait allows the [`program`] builder to take any closure that
 /// returns any `Into<Element<'_, Message>>`.
-///
-/// [`application`]: self::application()
-pub trait View<'a, State, Message> {
+pub trait View<'a, State, Message, Theme> {
     /// Produces the widget of the [`Program`].
-    fn view(&self, state: &'a State) -> impl Into<Element<'a, Message>>;
+    fn view(&self, state: &'a State) -> impl Into<Element<'a, Message, Theme>>;
 }
 
-impl<'a, T, State, Message, Widget> View<'a, State, Message> for T
+impl<'a, T, State, Message, Theme, Widget> View<'a, State, Message, Theme> for T
 where
     T: Fn(&'a State) -> Widget,
     State: 'static,
-    Widget: Into<Element<'a, Message>>,
+    Widget: Into<Element<'a, Message, Theme>>,
 {
-    fn view(&self, state: &'a State) -> impl Into<Element<'a, Message>> {
+    fn view(&self, state: &'a State) -> impl Into<Element<'a, Message, Theme>> {
         self(state)
     }
 }
