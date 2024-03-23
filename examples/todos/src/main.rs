@@ -16,6 +16,7 @@ static INPUT_ID: Lazy<text_input::Id> = Lazy::new(text_input::Id::unique);
 pub fn main() -> iced::Result {
     #[cfg(not(target_arch = "wasm32"))]
     tracing_subscriber::fmt::init();
+    std::env::set_var("ICED_BACKEND", "tiny-skia");
 
     iced::program(Todos::title, Todos::update, Todos::view)
         .load(Todos::load)
@@ -222,7 +223,7 @@ impl Todos {
                                 )
                             }),
                     )
-                    .spacing(10)
+                    .spacing(30)
                     .into()
                 } else {
                     empty_message(match filter {
@@ -234,11 +235,12 @@ impl Todos {
                     })
                 };
 
-                let content = column![title, input, controls, tasks]
-                    .spacing(20)
-                    .max_width(800);
+                let content =
+                    column![title, input, controls, scrollable(tasks)]
+                        .spacing(20)
+                        .max_width(800);
 
-                scrollable(container(content).padding(40).center_x()).into()
+                container(content).padding(40).center_x().into()
             }
         }
     }
@@ -335,25 +337,25 @@ impl Task {
 
     fn view(&self, i: usize) -> Element<TaskMessage> {
         match &self.state {
-            TaskState::Idle => {
-                let checkbox = checkbox(&self.description, self.completed)
-                    .on_toggle(TaskMessage::Completed)
-                    .width(Length::Fill)
-                    .size(17)
-                    .text_shaping(text::Shaping::Advanced);
+            // TaskState::Idle => {
+            //     let checkbox = checkbox(&self.description, self.completed)
+            //         .on_toggle(TaskMessage::Completed)
+            //         .width(Length::Fill)
+            //         .size(17)
+            //         .text_shaping(text::Shaping::Advanced);
 
-                row![
-                    checkbox,
-                    button(edit_icon())
-                        .on_press(TaskMessage::Edit)
-                        .padding(10)
-                        .style(button::text),
-                ]
-                .spacing(20)
-                .align_items(Alignment::Center)
-                .into()
-            }
-            TaskState::Editing => {
+            //     row![
+            //         checkbox,
+            //         button(edit_icon())
+            //             .on_press(TaskMessage::Edit)
+            //             .padding(10)
+            //             .style(button::text),
+            //     ]
+            //     .spacing(20)
+            //     .align_items(Alignment::Center)
+            //     .into()
+            // }
+            TaskState::Editing | TaskState::Idle => {
                 let text_input =
                     text_input("Describe your task...", &self.description)
                         .id(Self::text_input_id(i))
