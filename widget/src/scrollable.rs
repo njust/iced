@@ -379,6 +379,7 @@ pub struct Scrollbar {
     width: f32,
     margin: f32,
     scroller_width: f32,
+    min_scroller_length: f32,
     alignment: Anchor,
     spacing: Option<f32>,
     padding: f32,
@@ -390,6 +391,7 @@ impl Default for Scrollbar {
             width: 10.0,
             margin: 0.0,
             scroller_width: 10.0,
+            min_scroller_length: 2.0,
             alignment: Anchor::Start,
             spacing: None,
             padding: 0.0,
@@ -424,6 +426,15 @@ impl Scrollbar {
     /// Sets the scroller width of the [`Scrollbar`] .
     pub fn scroller_width(mut self, scroller_width: impl Into<Pixels>) -> Self {
         self.scroller_width = scroller_width.into().0.max(0.0);
+        self
+    }
+
+    /// Sets the minimum length of the scroller along the scrolling axis.
+    ///
+    /// Defaults to 2 pixels. The length is limited to the available scrollbar
+    /// track when the track is shorter than the requested minimum.
+    pub fn min_scroller_length(mut self, length: impl Into<Pixels>) -> Self {
+        self.min_scroller_length = length.into().0.max(0.0);
         self
     }
 
@@ -3171,6 +3182,7 @@ impl Scrollbars {
                 width,
                 margin,
                 scroller_width,
+                min_scroller_length,
                 spacing,
                 padding,
                 ..
@@ -3208,10 +3220,11 @@ impl Scrollbars {
             let scroller = if ratio >= 1.0 {
                 None
             } else {
-                // min height for easier grabbing with super tall content
-                let scroller_height = (scrollbar_bounds.height * ratio).max(2.0);
-                let scroller_offset =
-                    translation.y * ratio * scrollbar_bounds.height / bounds.height;
+                let scroller_height = (scrollbar_bounds.height * ratio)
+                    .max(min_scroller_length)
+                    .min(scrollbar_bounds.height);
+                let scroller_offset = translation.y / (content.height - bounds.height)
+                    * (scrollbar_bounds.height - scroller_height);
 
                 let scroller_bounds = Rectangle {
                     x: bounds.x + bounds.width - total_scrollbar_width / 2.0 - scroller_width / 2.0,
@@ -3242,6 +3255,7 @@ impl Scrollbars {
                 width,
                 margin,
                 scroller_width,
+                min_scroller_length,
                 spacing,
                 padding,
                 ..
@@ -3279,9 +3293,11 @@ impl Scrollbars {
             let scroller = if ratio >= 1.0 {
                 None
             } else {
-                // min width for easier grabbing with extra wide content
-                let scroller_length = (scrollbar_bounds.width * ratio).max(2.0);
-                let scroller_offset = translation.x * ratio * scrollbar_bounds.width / bounds.width;
+                let scroller_length = (scrollbar_bounds.width * ratio)
+                    .max(min_scroller_length)
+                    .min(scrollbar_bounds.width);
+                let scroller_offset = translation.x / (content.width - bounds.width)
+                    * (scrollbar_bounds.width - scroller_length);
 
                 let scroller_bounds = Rectangle {
                     x: (scrollbar_bounds.x + scroller_offset).max(0.0),
@@ -3646,5 +3662,76 @@ pub fn default(theme: &Theme, status: Status) -> Style {
                 auto_scroll,
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn minimum_scroller_length_reaches_both_ends() {
+        let bounds = Rectangle::new(Point::ORIGIN, Size::new(320.0, 320.0));
+        let scrollbar = Scrollbar::new().min_scroller_length(28);
+
+        for (axis, direction, content, end) in [
+            (
+                Axis::Y,
+                Direction::Vertical(scrollbar),
+                Size::new(320.0, 20_000.0),
+                Vector::new(0.0, 19_680.0),
+            ),
+            (
+                Axis::X,
+                Direction::Horizontal(scrollbar),
+                Size::new(20_000.0, 320.0),
+                Vector::new(19_680.0, 0.0),
+            ),
+        ] {
+            let start = Scrollbars::new(Vector::ZERO, direction, bounds, content);
+            let track = start.scrollbar(axis).unwrap();
+            let thumb = track.scroller.unwrap().bounds;
+            assert_eq!(axis.length(thumb), 28.0);
+            assert_eq!(
+                axis.coordinate(thumb.position()),
+                axis.coordinate(track.bounds.position())
+            );
+            assert_eq!(track.scroll_percentage(axis, 0.0, thumb.position()), 0.0);
+
+            let middle = Scrollbars::new(end / 2.0, direction, bounds, content);
+            let track = middle.scrollbar(axis).unwrap();
+            let thumb = track.scroller.unwrap().bounds;
+            assert_eq!(track.scroll_percentage(axis, 0.0, thumb.position()), 0.5);
+
+            let end = Scrollbars::new(end, direction, bounds, content);
+            let track = end.scrollbar(axis).unwrap();
+            let thumb = track.scroller.unwrap().bounds;
+            assert_eq!(
+                axis.coordinate(thumb.position()) + axis.length(thumb),
+                axis.coordinate(track.bounds.position()) + axis.length(track.bounds)
+            );
+            assert_eq!(track.scroll_percentage(axis, 0.0, thumb.position()), 1.0);
+        }
+    }
+
+    #[test]
+    fn default_minimum_scroller_length_is_two_pixels() {
+        let bounds = Rectangle::new(Point::ORIGIN, Size::new(320.0, 320.0));
+        let scrollbars = Scrollbars::new(
+            Vector::ZERO,
+            Direction::Vertical(Scrollbar::default()),
+            bounds,
+            Size::new(320.0, 200_000.0),
+        );
+        assert_eq!(scrollbars.y.unwrap().scroller.unwrap().bounds.height, 2.0);
+    }
+
+    #[test]
+    fn minimum_scroller_length_is_limited_to_track() {
+        let bounds = Rectangle::new(Point::ORIGIN, Size::new(20.0, 20.0));
+        let direction = Direction::Vertical(Scrollbar::new().min_scroller_length(28));
+        let scrollbars = Scrollbars::new(Vector::ZERO, direction, bounds, Size::new(20.0, 200.0));
+        let track = scrollbars.y.unwrap();
+        assert_eq!(track.scroller.unwrap().bounds.height, track.bounds.height);
     }
 }
