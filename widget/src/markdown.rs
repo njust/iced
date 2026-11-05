@@ -50,7 +50,7 @@ use crate::core::alignment;
 use crate::core::border;
 use crate::core::font::{self, Font};
 use crate::core::padding;
-use crate::core::text::LineHeight;
+use crate::core::text::{LineHeight, Wrapping};
 use crate::core::theme;
 use crate::core::{Code, Color, Length, Padding, Pixels, Theme};
 use crate::{
@@ -1900,6 +1900,7 @@ where
     rich_text(text.spans(settings, viewer.theme(), viewer.highlighter()))
         .size(settings.text_size)
         .line_height(settings.line_height)
+        .wrapping(Wrapping::WordOrGlyph)
         .on_link_click(on_link_click)
         .selectable(true)
 }
